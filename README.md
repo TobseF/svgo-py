@@ -119,6 +119,17 @@ The test suite reuses SVGO's own language-agnostic plugin fixtures
 reference implementation. Fixtures that depend on csso-specific behavior are
 marked `xfail` with a documented reason.
 
+## Release (PyPI)
+
+Requires `build` and `twine` (`pip install build twine`) and a configured
+`~/.pypirc` with a PyPI API token.
+
+```bash
+python -m build              # builds dist/*.tar.gz and dist/*.whl
+python -m twine check dist/* # validates package metadata
+python -m twine upload dist/*  # uploads to PyPI
+```
+
 ## License
 
 MIT (same as SVGO).
