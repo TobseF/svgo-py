@@ -150,7 +150,7 @@ def fn(root, params, info):
                 prelude = tinycss2.serialize(cnode.prelude).strip()
                 content = cnode.content if cnode.content is not None else []
                 declarations = [
-                    Declaration(d.lower_name, tinycss2.serialize(d.value).strip(), bool(d.important))
+                    Declaration(css.decl_name(d), tinycss2.serialize(d.value).strip(), bool(d.important))
                     for d in tinycss2.parse_declaration_list(content, skip_comments=True, skip_whitespace=True)
                     if d.type == "declaration"
                 ]

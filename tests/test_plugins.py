@@ -23,9 +23,20 @@ _RE_FILENAME = re.compile(r"^(.*)\.(\d+)\.svg\.txt$")
 _IDEMPOTENCE_EXCLUDE = {"addAttributesToSVGElement", "convertTransform"}
 
 
+def _fixture_plugin_names():
+    names = set()
+    for filename in os.listdir(FIXTURES_DIR):
+        match = _RE_FILENAME.match(filename)
+        if match:
+            names.add(match.group(1))
+    return names
+
+
 def _implemented():
+    """Every plugin that resolves via get_plugin and has fixtures (preset +
+    the ported non-default plugins)."""
     impl = set()
-    for name in PRESET_DEFAULT_PLUGINS:
+    for name in set(PRESET_DEFAULT_PLUGINS) | _fixture_plugin_names():
         try:
             if get_plugin(name) is not None:
                 impl.add(name)
@@ -34,7 +45,6 @@ def _implemented():
     return impl
 
 
-# Only run fixtures for plugins that are part of the ported default preset.
 _IMPLEMENTED = _implemented()
 
 
@@ -42,16 +52,23 @@ def _normalize(text: str) -> str:
     return text.strip().replace(os.linesep, "\n").replace("\r\n", "\n")
 
 
-# minifyStyles relies on the JS `csso` library's structural optimizations
-# (shorthand merging, usage-based removal). This pure-Python port only does
-# whitespace/comment minification, so several csso-specific fixtures cannot
-# match. They are marked xfail (non-strict: whitespace-only cases still pass).
-_XFAIL_PLUGINS = {"minifyStyles": "csso structural optimizations not reproduced in pure Python"}
+# The CSS minifier does whitespace/comment removal plus csso-style *value*
+# minification (color/number/url), but not csso's *structural* optimizations
+# (shorthand merging, usage-based dead-rule removal, rule restructuring). The
+# fixtures below exercise those structural passes and cannot match; they are
+# marked xfail (non-strict) with the specific reason.
+_XFAIL_PLUGINS = {}
 
-# Specific fixtures that depend on csstree's exact at-rule serialization
-# (url() unquoting, @media query normalization, whitespace minification of
-# @font-face/@keyframes/@supports/@document blocks).
 _XFAIL_CASES = {
+    # csso structural optimizations (shorthand merge / usage-based removal)
+    "minifyStyles.01": "csso shorthand merging not reproduced",
+    "minifyStyles.02": "csso shorthand merging not reproduced",
+    "minifyStyles.03": "csso shorthand merging not reproduced",
+    "minifyStyles.04": "csso usage-based dead-rule removal not reproduced",
+    "minifyStyles.05": "csso usage-based dead-rule removal not reproduced",
+    "minifyStyles.09": "csso structural optimization not reproduced",
+    "minifyStyles.11": "csso structural optimization not reproduced",
+    # csstree-exact at-rule serialization (url() unquoting, @media handling)
     "inlineStyles.13": "csstree-exact at-rule serialization not reproduced",
     "inlineStyles.14": "csstree-exact @media serialization not reproduced",
     "inlineStyles.15": "csstree-exact at-rule serialization not reproduced",

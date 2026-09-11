@@ -60,6 +60,12 @@ class Rule:
 # declaration parsing
 # --------------------------------------------------------------------------
 
+def decl_name(d) -> str:
+    """Declaration property name: lowercased, except custom properties (``--*``)
+    which are case-sensitive and must be preserved verbatim (like CSSO)."""
+    return d.name if d.name.startswith("--") else d.lower_name
+
+
 def _serialize_value(tokens) -> str:
     return tinycss2.serialize(tokens).strip()
 
@@ -69,7 +75,7 @@ def parse_style_declarations(css: str) -> List[Declaration]:
     for decl in tinycss2.parse_declaration_list(css, skip_comments=True, skip_whitespace=True):
         if decl.type == "declaration":
             declarations.append(
-                Declaration(decl.lower_name, _serialize_value(decl.value), bool(decl.important))
+                Declaration(decl_name(decl), _serialize_value(decl.value), bool(decl.important))
             )
     return declarations
 
@@ -85,7 +91,7 @@ def _rules_from_qualified(rule, dynamic: bool) -> List[Rule]:
     prelude = tinycss2.serialize(rule.prelude).strip()
     content = rule.content if rule.content is not None else []
     declarations = [
-        Declaration(d.lower_name, _serialize_value(d.value), bool(d.important))
+        Declaration(decl_name(d), _serialize_value(d.value), bool(d.important))
         for d in tinycss2.parse_declaration_list(content, skip_comments=True, skip_whitespace=True)
         if d.type == "declaration"
     ]
@@ -441,13 +447,168 @@ def matches(node, selector: str, parents: Optional[Dict[Any, Any]] = None, stric
     return any(_match(s.parsed_tree, node, parents, strict) for s in parsed)
 
 
-def minify_css(css: str, preserve_exclamation: bool = True) -> str:
-    """Best-effort CSS minifier (whitespace + comment removal).
+import re as _re
+from .collections import colorsNames, colorsShortNames
 
-    NOTE: this is *not* a full CSSO port. It performs whitespace/comment
-    compaction only; it does not do CSSO's structural optimizations
-    (shorthand merging, rule restructuring, usage-based dead-code removal).
+_reg_short_hex = _re.compile(r"^#(([0-9a-fA-F])\2){3}$")
+
+
+def _min_number_repr(rep: str) -> str:
+    """csso-style number minification: drop a leading ``+``, insignificant
+    leading zeros (``0.5`` -> ``.5``) and trailing fraction zeros
+    (``1.50`` -> ``1.5``, ``1.0`` -> ``1``). Scientific notation is left as-is."""
+    if "e" in rep or "E" in rep:
+        return rep
+    s = rep
+    neg = ""
+    if s[:1] in "+-":
+        neg = "-" if s[0] == "-" else ""
+        s = s[1:]
+    if "." in s:
+        intp, frac = s.split(".", 1)
+        frac = frac.rstrip("0")
+        intp = intp.lstrip("0")
+        s = (intp + "." + frac) if frac else (intp if intp else "0")
+    else:
+        s = s.lstrip("0") or "0"
+    return neg + s
+
+
+def _min_hex(value: str) -> str:
+    m = _reg_short_hex.match(value)
+    if m:
+        value = "#" + value[1] + value[3] + value[5]
+    low = value.lower()
+    return colorsShortNames.get(low, low)
+
+
+def _min_color_name(name: str):
+    hexv = colorsNames.get(name.lower())
+    if hexv is None:
+        return None
+    return _min_hex(hexv)
+
+
+def _min_value_tokens(tokens) -> str:
+    out = []
+    pending_ws = False
+    for t in tokens:
+        tt = t.type
+        if tt == "whitespace":
+            pending_ws = True
+            continue
+        if tt == "comment":
+            continue
+        if out and pending_ws:
+            # a separating space is only needed between two "word" tokens
+            prev = out[-1][-1] if out[-1] else ""
+            if prev not in "(,/" :
+                out.append(" ")
+        pending_ws = False
+        if tt in ("number", "percentage", "dimension"):
+            rep = _min_number_repr(t.representation)
+            if tt == "percentage":
+                out.append(rep + "%")
+            elif tt == "dimension":
+                out.append(rep + t.unit)
+            else:
+                out.append(rep)
+        elif tt == "hash":
+            # hex color in a value
+            if t.is_identifier or _re.match(r"^[0-9a-fA-F]+$", t.value):
+                out.append(_min_hex("#" + t.value))
+            else:
+                out.append(tinycss2.serialize([t]))
+        elif tt == "ident":
+            color = _min_color_name(t.value)
+            out.append(color if color is not None else tinycss2.serialize([t]))
+        elif tt == "function" and t.lower_name == "url":
+            out.append(_minify_url_function(t))
+        elif tt == "function":
+            # recurse into function arguments (e.g. linear-gradient(), calc())
+            out.append(t.name + "(" + _min_value_tokens(t.arguments) + ")")
+        else:
+            out.append(tinycss2.serialize([t]))
+    return "".join(out).strip()
+
+
+def _min_declarations(content) -> str:
+    parts = []
+    for d in tinycss2.parse_declaration_list(content, skip_comments=True, skip_whitespace=True):
+        if d.type != "declaration":
+            continue
+        # custom properties (--*) are case-sensitive and must not be lowercased
+        prop = decl_name(d)
+        value = _min_value_tokens(d.value)
+        important = "!important" if d.important else ""
+        parts.append(f"{prop}:{value}{important}")
+    return ";".join(parts)
+
+
+_reg_unquotable_url = _re.compile(r"^[^\s\"'()\\,;]+$")
+
+
+def _minify_url_function(token) -> str:
+    inner = tinycss2.serialize(token.arguments).strip()
+    if (inner.startswith('"') and inner.endswith('"')) or (inner.startswith("'") and inner.endswith("'")):
+        unquoted = inner[1:-1]
+        if _reg_unquotable_url.match(unquoted):
+            return "url(" + unquoted + ")"
+    return "url(" + inner + ")"
+
+
+def _min_selector(prelude) -> str:
+    text = tinycss2.serialize(prelude)
+    text = _re.sub(r"/\*[\s\S]*?\*/", "", text)
+    text = _re.sub(r"\s+", " ", text.strip())
+    text = _re.sub(r"\s*([>+~,])\s*", r"\1", text)
+    return text
+
+
+def _min_render_node(node, preserve_exclamation) -> str:
+    if node.type == "qualified-rule":
+        decls = _min_declarations(node.content or [])
+        if decls == "":
+            # CSSO drops rules with an empty declaration block
+            return ""
+        return _min_selector(node.prelude) + "{" + decls + "}"
+    if node.type == "at-rule":
+        prelude_txt = _re.sub(r"\s+", " ", tinycss2.serialize(node.prelude)).strip()
+        header = "@" + node.at_keyword + (" " + prelude_txt if prelude_txt else "")
+        # preserve @-rules that are always kept verbatim (name/charset/import)
+        if node.content is None:
+            return header + ";"
+        inner = tinycss2.parse_stylesheet(
+            tinycss2.serialize(node.content), skip_comments=True, skip_whitespace=True
+        )
+        if any(n.type in ("qualified-rule", "at-rule") for n in inner):
+            body = "".join(_min_render_node(n, preserve_exclamation) for n in inner)
+        else:
+            body = _min_declarations(node.content)
+        return header + "{" + body + "}"
+    if node.type == "comment":
+        if preserve_exclamation and node.value.startswith("!"):
+            return "/*" + node.value + "*/"
+        return ""
+    return ""
+
+
+def minify_css(css: str, preserve_exclamation: bool = True) -> str:
+    """CSS minifier: whitespace/comment removal plus csso-style value
+    minification (color name -> hex, hex shortening, number leading/trailing
+    zero removal). Structural optimizations (shorthand merging, usage-based
+    dead-rule removal, rule restructuring) are still not performed. Falls back
+    to whitespace-only minification if the stylesheet cannot be parsed.
     """
+    try:
+        nodes = tinycss2.parse_stylesheet(css, skip_comments=False, skip_whitespace=True)
+        rendered = "".join(_min_render_node(n, preserve_exclamation) for n in nodes)
+        return rendered
+    except Exception:
+        return _minify_ws_only(css, preserve_exclamation)
+
+
+def _minify_ws_only(css: str, preserve_exclamation: bool = True) -> str:
     out = []
     i = 0
     n = len(css)
@@ -517,11 +678,16 @@ def minify_css(css: str, preserve_exclamation: bool = True) -> str:
 
 
 def minify_block(css: str) -> str:
-    """Minify a declaration block (the content of a ``style`` attribute)."""
-    minified = minify_css(css)
-    if minified.endswith(";"):
-        minified = minified[:-1]
-    return minified
+    """Minify a declaration block (the content of a ``style`` attribute),
+    including csso-style value minification."""
+    try:
+        tokens = tinycss2.parse_component_value_list(css)
+        return _min_declarations(tokens)
+    except Exception:
+        minified = _minify_ws_only(css)
+        if minified.endswith(";"):
+            minified = minified[:-1]
+        return minified
 
 
 def _build_parents(node, parents, parent=None):

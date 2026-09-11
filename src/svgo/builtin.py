@@ -47,10 +47,45 @@ PRESET_DEFAULT_PLUGINS: List[str] = [
     "removeDesc",
 ]
 
+# All built-in plugins (preset-default members + the non-default plugins),
+# matching SVGO's `builtinPlugins` export.
+ALL_PLUGINS = sorted(set(PRESET_DEFAULT_PLUGINS) | {
+    "addAttributesToSVGElement",
+    "addClassesToSVGElement",
+    "cleanupListOfValues",
+    "convertOneStopGradients",
+    "convertStyleToAttrs",
+    "prefixIds",
+    "removeAttributesBySelector",
+    "removeAttrs",
+    "removeDimensions",
+    "removeElementsByAttr",
+    "removeOffCanvasPaths",
+    "removeRasterImages",
+    "removeScripts",
+    "removeStyleElement",
+    "removeTitle",
+    "removeViewBox",
+    "removeXMLNS",
+    "removeXlink",
+    "reusePaths",
+})
+
 _ALIASES = {
     # removeScriptElement was renamed to removeScripts
     "removeScriptElement": "removeScripts",
 }
+
+
+def builtin_plugins():
+    """Return the resolved builtin plugin descriptors (name/description/fn),
+    including the ``preset-default`` preset -- mirrors SVGO's ``builtinPlugins``."""
+    result = [_preset_default()]
+    for name in ALL_PLUGINS:
+        plugin = _builtin_plugin(name)
+        if plugin is not None:
+            result.append(plugin)
+    return result
 
 _cache: Dict[str, Dict[str, Any]] = {}
 

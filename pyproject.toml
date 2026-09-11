@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "svgo-py"
-version = "4.1.0"
+version = "4.1.0.1"
 description = "Pure-Python reimplementation of SVGO (SVG Optimizer). Optimize/minify SVG without a JS interpreter."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -12,7 +12,7 @@ license = { text = "MIT" }
 authors = [{ name = "Tobse", email = "Public.Tobse@gmail.com" }]
 keywords = ["svg", "svgo", "optimize", "minify"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -28,6 +28,11 @@ dependencies = [
     "tinycss2>=1.2",
     "cssselect>=1.2",
 ]
+
+[project.urls]
+Homepage = "https://github.com/TobseF/svgo-py"
+Repository = "https://github.com/TobseF/svgo-py.git"
+Issues = "https://github.com/TobseF/svgo-py/issues"
 
 [project.optional-dependencies]
 test = ["pytest>=7.0"]

@@ -70,41 +70,47 @@ cat in.svg | pysvgo - -o -
 
 ## Scope
 
-This port implements the full **`preset-default`** pipeline — the 33 plugins
-SVGO runs by default:
-
-`removeDoctype, removeXMLProcInst, removeComments, removeDeprecatedAttrs,
-removeMetadata, removeEditorsNSData, cleanupAttrs, mergeStyles, inlineStyles,
-minifyStyles, cleanupIds, removeUselessDefs, cleanupNumericValues,
-convertColors, removeUnknownsAndDefaults, removeNonInheritableGroupAttrs,
-removeUselessStrokeAndFill, cleanupEnableBackground, removeHiddenElems,
-removeEmptyText, convertShapeToPath, convertEllipseToCircle,
-moveElemsAttrsToGroup, moveGroupAttrsToElems, collapseGroups, convertPathData,
-convertTransform, removeEmptyAttrs, removeEmptyContainers, mergePaths,
-removeUnusedNS, sortAttrs, sortDefsChildren, removeDesc`
+This port implements **all 53 built-in SVGO plugins** — the full
+**`preset-default`** pipeline (33 plugins run by default) **and** every
+non-default plugin (`addAttributesToSVGElement`, `addClassesToSVGElement`,
+`cleanupListOfValues`, `convertOneStopGradients`, `convertStyleToAttrs`,
+`prefixIds`, `removeAttributesBySelector`, `removeAttrs`, `removeDimensions`,
+`removeElementsByAttr`, `removeOffCanvasPaths`, `removeRasterImages`,
+`removeScripts`, `removeStyleElement`, `removeTitle`, `removeViewBox`,
+`removeXMLNS`, `removeXlink`, `reusePaths`). Any plugin can be selected by name
+via `{"plugins": [...]}`; `builtin_plugins()` returns the full descriptor list.
 
 The full path-data optimizer (`convertPathData`, including curve→arc detection),
 the transform engine (`convertTransform`, matrix decomposition), path merging
-with GJK hull-intersection, the CSS cascade / selector engine used by
-`inlineStyles`, `removeHiddenElems`, etc. are all implemented natively.
+with GJK hull-intersection, and the CSS cascade / selector engine used by
+`inlineStyles`, `removeHiddenElems`, `prefixIds`, etc. are all implemented
+natively.
 
-### Known limitation: `minifyStyles`
+### CSS minification (`minifyStyles`)
 
 SVGO uses the JavaScript [`csso`](https://github.com/css/csso) library for CSS
-minification. There is no pure-Python equivalent, so `minifyStyles` (and the CSS
-minification `inlineStyles` performs on remaining `<style>` content and `style`
-attributes) performs **whitespace/comment-level minification only**. It does
-**not** reproduce csso's value-level and structural optimizations:
+minification, which has no pure-Python equivalent. This port's minifier
+reproduces csso's **whitespace/comment removal** and **value-level
+minification**:
 
-* color minification (`black` → `#000`, `0.5` → `.5`),
+* color minification — `black` → `#000`, `#FFFFFF` → `#fff` (including inside
+  functions like `linear-gradient(...)`),
+* number minification — `0.5` → `.5`, `1.50` → `1.5`,
+* `url("#x")` → `url(#x)` unquoting,
+* dropping empty rules,
+* custom properties (`--Foo`) are preserved case-sensitively and left untouched.
+
+It does **not** reproduce csso's **structural** optimizations:
+
 * shorthand merging (`padding-top/right/bottom/left` → `padding`),
-* usage-based dead-rule elimination,
-* rule restructuring.
+* usage-based dead-rule elimination (removing rules whose selectors match no
+  element),
+* duplicate-selector / rule restructuring,
+* a few csstree-exact at-rule serialization details.
 
-Everything else in the pipeline matches the reference byte-for-byte. In a
-differential test over the project's fixture corpus, **every** remaining
-difference versus reference SVGO is attributable to this CSS-value minification
-inside `<style>` / `style` attributes; there are no structural differences.
+In a differential test over the project's fixture corpus, **every** remaining
+difference versus reference SVGO is attributable to one of these structural CSS
+passes inside `<style>` / `style` attributes; there are no other differences.
 
 ## Tests
 
